@@ -1,0 +1,31 @@
+services:
+  - type: worker
+    name: telegram-vc-audio-bot
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: starter
+    autoDeploy: true
+    disk:
+      name: telegram-vc-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: API_ID
+        sync: false
+      - key: API_HASH
+        sync: false
+      - key: BOT_TOKEN
+        sync: false
+      - key: USER_PHONE
+        sync: false
+      - key: ADMIN_IDS
+        sync: false
+      - key: AUDIO_VOLUME
+        value: "5000"
+      - key: AUDIO_GAIN
+        value: "500"
+      - key: KEEP_FILES
+        value: "false"
+      - key: DATA_DIR
+        value: "/var/data"
