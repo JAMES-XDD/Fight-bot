@@ -1,4 +1,4 @@
 telethon>=1.45,<2
-py-tgcalls>=2.3.4
+py-tgcalls==2.3.3
 python-dotenv>=1.0,<2
 aiohttp>=3.10,<4
