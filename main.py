@@ -1,4 +1,6 @@
 import asyncio
+import os
+from aiohttp import web
 import logging
 import os
 import time
@@ -214,7 +216,23 @@ async def button_handler(event):
 async def stream_end_handler(_, update: StreamEnded):
     await player.on_stream_end(update.chat_id)
 
+
+async def health_handler(request):
+    return web.json_response({"status": "ok", "service": "telegram-vc-audio-bot"})
+
+async def start_health_server():
+    app = web.Application()
+    app.router.add_get("/", health_handler)
+    app.router.add_get("/health", health_handler)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv("PORT", "10000"))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    return runner
+
 async def main():
+    health_runner = await start_health_server()
     log.info("Starting control bot…")
     await bot.start(bot_token=BOT_TOKEN)
 

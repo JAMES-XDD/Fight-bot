@@ -1,23 +1,23 @@
 # Telegram VC Audio Bot — Render Ready
 
-This version is prepared for a **Render Background Worker** and uses a Render Persistent Disk for the Telegram session and downloaded audio.
+This version is prepared for a **Render Free Web Service** and uses a Render Persistent Disk for the Telegram session and downloaded audio.
 
 ## Render architecture
 
 ```text
 Render
-└── Background Worker
+└── Free Web Service
     ├── Telegram Bot account (commands/buttons)
     ├── Telegram User account (VC playback)
     ├── Telethon
     ├── PyTgCalls
     ├── FFmpeg
-    └── /var/data  <-- persistent disk
+    └── /tmp/telegram-vc-data  <-- persistent disk
          ├── sessions/
          └── downloads/
 ```
 
-Render background workers run continuously and do not expose an incoming URL. A persistent disk is therefore used for the Telethon `.session` and local audio files.
+Render Free Web Services run continuously and do not expose an incoming URL. A persistent disk is therefore used for the Telethon `.session` and local audio files.
 
 ## Deploy
 
@@ -32,7 +32,7 @@ Render background workers run continuously and do not expose an incoming URL. A 
    - `ADMIN_IDS`
 5. Deploy.
 
-The Blueprint creates a Background Worker with a 1 GB persistent disk mounted at `/var/data`.
+The Blueprint creates a Free Web Service with a 1 GB persistent disk mounted at `/tmp/telegram-vc-data`.
 
 ### Important: first Telegram login
 
@@ -47,7 +47,7 @@ python main.py
 Complete the Telegram login when prompted. The resulting session is stored under:
 
 ```text
-/var/data/sessions/user.session
+/tmp/telegram-vc-data/sessions/user.session
 ```
 
 After that, normal worker restarts use the stored session.
@@ -67,7 +67,7 @@ AUDIO_VOLUME=5000
 AUDIO_GAIN=500
 KEEP_FILES=false
 
-DATA_DIR=/var/data
+DATA_DIR=/tmp/telegram-vc-data
 
 MONITOR_URL=
 MONITOR_TOKEN=
@@ -167,14 +167,14 @@ Do not put Telegram OTPs, API hashes, bot tokens, or session data into heartbeat
 The Blueprint mounts:
 
 ```text
-/var/data
+/tmp/telegram-vc-data
 ```
 
 The application stores persistent data there:
 
 ```text
-/var/data/sessions
-/var/data/downloads
+/tmp/telegram-vc-data/sessions
+/tmp/telegram-vc-data/downloads
 ```
 
 Only files under the attached disk survive Render restarts/deploys. Render documents that the normal filesystem is ephemeral.
@@ -189,7 +189,7 @@ plan: starter
 
 You can change the worker plan in `render.yaml` or in the Render Dashboard.
 
-A persistent disk is required for the Telegram user session. The disk is attached to the Background Worker, not the monitoring web service.
+A persistent disk is required for the Telegram user session. The disk is attached to the Free Web Service, not the monitoring web service.
 
 ## Local testing
 
@@ -222,6 +222,17 @@ If a bot token or user session is exposed, revoke/rotate the affected credential
 
 ## Notes
 
-A Render Background Worker does not expose an HTTP endpoint. It is the right Render service type for this continuously running process, while a separate Web Service can be used for a dashboard/monitor.
+A Render Free Web Service does not expose an HTTP endpoint. It is the right Render service type for this continuously running process, while a separate Web Service can be used for a dashboard/monitor.
 
 A monitor that polls an endpoint cannot make a crashed worker stay alive by itself; Render should handle worker restarts. The monitor is for visibility and alerting.
+
+
+## Render Free Web Service
+
+This version is configured for a Render Free Web Service and includes `/` and `/health`
+HTTP endpoints so Render can monitor the service.
+
+Important: Render Free Web Services have ephemeral storage and may spin down/restart.
+Telegram session files and downloaded audio are stored under `/tmp/telegram-vc-data`
+and may be lost after a restart. For reliable 24/7 operation with persistent Telegram
+sessions, use a paid service with a persistent disk.
