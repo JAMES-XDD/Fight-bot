@@ -236,3 +236,27 @@ Important: Render Free Web Services have ephemeral storage and may spin down/res
 Telegram session files and downloaded audio are stored under `/tmp/telegram-vc-data`
 and may be lost after a restart. For reliable 24/7 operation with persistent Telegram
 sessions, use a paid service with a persistent disk.
+
+
+### Dependency note
+PyTgCalls is pinned to stable release 2.3.3 because 2.3.4 is not published on PyPI.
+
+
+## First-time Telegram user login on Render
+
+The free Web Service cannot provide an interactive terminal for Telethon's first-login prompt.
+This version therefore supports a private `.login` command from an authorized admin.
+
+1. Set `USER_PHONE` to the phone number of the Telegram user account used for VC playback.
+2. Set `ADMIN_IDS` to your numeric Telegram user ID.
+3. Deploy the service and open a private chat with the control bot.
+4. Send `.login`.
+5. Telegram sends the login code to the `USER_PHONE` account. Enter that code in the private chat with your bot.
+6. If Telegram asks for 2-step verification, enter the 2FA password in that same private chat.
+7. Never send the OTP or 2FA password to anyone else, and never put them in GitHub.
+
+The OTP/password are kept only in temporary in-memory login state and are not written to logs.
+Incoming credential messages are deleted after processing when possible.
+
+Because Render Free Web Services use ephemeral storage, the Telegram session can be lost after
+a restart or spin-down. If that happens, use `.login` again.

@@ -1,19 +1,20 @@
 import asyncio
-import os
-from aiohttp import web
 import logging
 import os
 import time
 from pathlib import Path
 
-from aiohttp import ClientSession
+from aiohttp import ClientSession, web
 from dotenv import load_dotenv
 from telethon import Button, TelegramClient, events
+from telethon.errors import SessionPasswordNeededError, PasswordHashInvalidError
 from pytgcalls import PyTgCalls
 from pytgcalls import filters as tgcall_filters
 from pytgcalls.types import StreamEnded
 
 from player import PlayerManager
+
+load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.getenv("DATA_DIR", str(BASE_DIR))).resolve()
@@ -21,8 +22,6 @@ DOWNLOAD_DIR = DATA_DIR / "downloads"
 SESSION_DIR = DATA_DIR / "sessions"
 DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 SESSION_DIR.mkdir(parents=True, exist_ok=True)
-
-load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -59,6 +58,18 @@ player = PlayerManager(
     KEEP_FILES,
 )
 started_at = time.time()
+
+# Temporary login state. Never log or persist OTP/2FA values.
+login_states = {}
+calls_started = False
+
+async def ensure_calls_started():
+    global calls_started
+    if not calls_started:
+        await calls.start()
+        calls_started = True
+
+
 
 def allowed(event):
     return not ADMIN_IDS or (event.sender_id in ADMIN_IDS if event.sender_id else False)
@@ -109,6 +120,117 @@ async def heartbeat():
         except Exception:
             log.exception("Heartbeat failed")
         await asyncio.sleep(HEARTBEAT_SECONDS)
+
+
+@bot.on(events.NewMessage(pattern=r"(?i)^[./]login$"))
+async def login_handler(event):
+    if not allowed(event):
+        return
+    if not event.is_private:
+        await event.reply("🔐 For security, use `.login` in a private chat with the bot.")
+        return
+    if not PHONE:
+        await event.reply("❌ `USER_PHONE` is not configured on Render.", parse_mode="md")
+        return
+
+    try:
+        if not user.is_connected():
+            await user.connect()
+        if await user.is_user_authorized():
+            me = await user.get_me()
+            player.user_me = me
+            await event.reply(f"✅ User account is already logged in as **{me.first_name}**.")
+            return
+
+        sent = await user.send_code_request(PHONE)
+        login_states[event.sender_id] = {
+            "phone_code_hash": sent.phone_code_hash,
+            "stage": "code",
+        }
+        await event.reply(
+            "🔐 Telegram login started.\n\n"
+            "Send the **Telegram login code** you just received here.\n"
+            "This message must be in this private chat and will be removed after processing when possible.\n\n"
+            "⚠️ Never send the code anywhere else."
+        )
+    except Exception as exc:
+        login_states.pop(event.sender_id, None)
+        log.exception("Login start failed")
+        await event.reply(f"❌ Login start failed: `{type(exc).__name__}`", parse_mode="md")
+
+
+@bot.on(events.NewMessage())
+async def login_input_handler(event):
+    if not allowed(event) or not event.is_private:
+        return
+    state = login_states.get(event.sender_id)
+    if not state:
+        return
+
+    text = (event.raw_text or "").strip()
+
+    # Ignore commands so they can still be used normally.
+    if text.startswith(".") or text.startswith("/"):
+        return
+
+    # OTP stage: only accept a numeric Telegram code.
+    if state["stage"] == "code":
+        if not text.isdigit() or not (3 <= len(text) <= 10):
+            await event.reply("❌ That doesn't look like a Telegram login code. Send the numeric code only.")
+            return
+        try:
+            await user.sign_in(
+                phone=PHONE,
+                code=text,
+                phone_code_hash=state["phone_code_hash"],
+            )
+            login_states.pop(event.sender_id, None)
+            player.user_me = await user.get_me()
+            await ensure_calls_started()
+            await event.reply(
+                f"✅ Telegram user account logged in as **{player.user_me.first_name}**."
+            )
+        except SessionPasswordNeededError:
+            state["stage"] = "password"
+            await event.reply(
+                "🔐 Your Telegram account has 2-step verification enabled.\n\n"
+                "Send your Telegram **2FA password** in this private chat."
+            )
+        except Exception as exc:
+            login_states.pop(event.sender_id, None)
+            log.exception("OTP login failed")
+            await event.reply(f"❌ Login failed: `{type(exc).__name__}`", parse_mode="md")
+        finally:
+            try:
+                await event.delete()
+            except Exception:
+                pass
+        return
+
+    # 2FA password stage.
+    if state["stage"] == "password":
+        if not text:
+            return
+        try:
+            await user.sign_in(password=text)
+            login_states.pop(event.sender_id, None)
+            player.user_me = await user.get_me()
+            await ensure_calls_started()
+            await event.reply(
+                f"✅ Telegram user account logged in as **{player.user_me.first_name}**."
+            )
+        except PasswordHashInvalidError:
+            await event.reply("❌ Incorrect 2FA password. Try again.")
+            return
+        except Exception as exc:
+            login_states.pop(event.sender_id, None)
+            log.exception("2FA login failed")
+            await event.reply(f"❌ 2FA login failed: `{type(exc).__name__}`", parse_mode="md")
+        finally:
+            try:
+                await event.delete()
+            except Exception:
+                pass
 
 @bot.on(events.NewMessage(pattern=r"(?i)^[./]help$"))
 async def help_handler(event):
@@ -237,15 +359,16 @@ async def main():
     await bot.start(bot_token=BOT_TOKEN)
 
     log.info("Starting Telegram user account…")
-    if PHONE:
-        await user.start(phone=PHONE)
+    await user.connect()
+
+    if await user.is_user_authorized():
+        player.user_me = await user.get_me()
+        log.info("Logged in as %s (%s)", player.user_me.first_name, player.user_me.id)
+        await calls.start()
     else:
-        await user.start()
-
-    player.user_me = await user.get_me()
-    log.info("Logged in as %s (%s)", player.user_me.first_name, player.user_me.id)
-
-    await calls.start()
+        log.info("Telegram user account is not logged in. Use .login in a private chat with the bot.")
+        # PyTgCalls can only start after the user account is authorized.
+        # It is started by the login flow after successful authentication.
     tasks = [bot.run_until_disconnected(), user.run_until_disconnected()]
     if MONITOR_URL:
         tasks.append(heartbeat())
